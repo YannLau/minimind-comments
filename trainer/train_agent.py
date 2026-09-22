@@ -273,8 +273,6 @@ def rl_train_epoch(epoch, loader, iters, rollout_engine, ref_model, reward_model
         rewards = calculate_rewards(prompts, completions, gt_batch, tools_batch, args.num_generations, reward_model, device=args.device, turn_outputs_batch=turn_outputs_batch, unfinished_batch=unfinished_batch)
 
         with autocast_ctx:
-            # 反向传播必须经过 DDP 包装后的模块：直接调用 .module 会跳过
-            # DDP 的 prepare_for_backward，梯度不会 all-reduce，各卡静默发散。
             res = model(input_ids, attention_mask=full_mask)
             aux_loss = res.aux_loss if lm_config.use_moe else torch.tensor(0.0, device=args.device)
             logits = res.logits[:, :-1, :]
@@ -471,7 +469,6 @@ if __name__ == "__main__":
     if args.use_compile == 1:
         model = torch.compile(model)
         Logger('torch.compile enabled')
-        rollout_engine.update_policy(model)
     if dist.is_initialized():
         # 同 train_ppo：RoPE buffer 各 rank 一致，每步广播纯属浪费
         model = DistributedDataParallel(model, device_ids=[local_rank], broadcast_buffers=False)

@@ -224,12 +224,12 @@ class Attention(nn.Module):
             output = F.scaled_dot_product_attention(xq, xk, xv, dropout_p=self.dropout if self.training else 0.0, is_causal=self.is_causal)
         else:
             # scores:[B,H,S_query,S_key]。除以 sqrt(D_h) 防止点积随维度增大而使 softmax 饱和。
-            scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            scores = (xq @ xk.transpose(-2, -1)).float() / math.sqrt(self.head_dim)
             # 只对右下角“本次新增 token 之间”的区域加上上三角 -inf；历史 token 均可被看到。
             if self.is_causal: scores[:, :, :, -seq_len:] += torch.full((seq_len, seq_len), float("-inf"), device=scores.device).triu(1)
             # padding 位置加一个极小值，使其 softmax 概率趋近于 0。
             if attention_mask is not None: scores += (1.0 - attention_mask.unsqueeze(1).unsqueeze(2)) * -1e9
-            output = self.attn_dropout(F.softmax(scores.float(), dim=-1).type_as(xq)) @ xv
+            output = self.attn_dropout(F.softmax(scores, dim=-1).type_as(xq)) @ xv
         # 合并多头后做输出投影，恢复 [B,S,D]，供残差连接使用。
         output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
         output = self.resid_dropout(self.o_proj(output))

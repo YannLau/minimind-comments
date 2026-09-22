@@ -9,6 +9,10 @@ pyproject.toml
 uv.lock
 .python-version
 checkpoints/
-dataset/
+
 
 model_learn_tokenizer
+
+pretrain_t2t_mini.jsonl
+rlaif.jsonl
+sft_t2t_mini.jsonl

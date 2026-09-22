@@ -71,8 +71,8 @@ def pre_processing_chat(conversations, add_system_ratio=0.2):
             return [{'role': 'system', 'content': random.choice(SYSTEM_PROMPTS)}] + conversations
     return conversations
 
-
-def post_processing_chat(prompt_content, empty_think_ratio=0.2):
+def post_processing_chat(prompt_content, empty_think_ratio=0.2, remove_empty_think=None):
+    # 以80%概率移除空思考标签
     """随机清理聊天模板生成的空思考块。
 
     参数名表示“保留空思考块的概率”。默认值为 0.2，因此约 80% 的样本会移除
@@ -80,8 +80,11 @@ def post_processing_chat(prompt_content, empty_think_ratio=0.2):
     倾向，同时仍让模型见过这种合法模板形式。
     """
     # random.random() 落在 [0, 1)，大于 0.2 的概率约为 80%。
-    if '<think>\n\n</think>\n\n' in prompt_content and random.random() > empty_think_ratio:
-        prompt_content = prompt_content.replace('<think>\n\n</think>\n\n', '')
+    if '<think>\n\n</think>\n\n' in prompt_content:
+        if remove_empty_think is None:
+            remove_empty_think = random.random() > empty_think_ratio
+        if remove_empty_think:
+            prompt_content = prompt_content.replace('<think>\n\n</think>\n\n', '')
     return prompt_content
 
 
@@ -247,12 +250,13 @@ class DPODataset(Dataset):
         chosen_prompt = self.tokenizer.apply_chat_template(
             chosen, tokenize=False, add_generation_prompt=False
         )
-        chosen_prompt = post_processing_chat(chosen_prompt)
 
         rejected_prompt = self.tokenizer.apply_chat_template(
             rejected, tokenize=False, add_generation_prompt=False
         )
-        rejected_prompt = post_processing_chat(rejected_prompt)
+        remove_empty_think = random.random() > 0.2
+        chosen_prompt = post_processing_chat(chosen_prompt, remove_empty_think=remove_empty_think)
+        rejected_prompt = post_processing_chat(rejected_prompt, remove_empty_think=remove_empty_think)
         # DPO 的一个 batch 需要张量等长；这里直接让 tokenizer 截断并补齐到 max_length。
         chosen_encoding = self.tokenizer(
             chosen_prompt, truncation=True, max_length=self.max_length, padding='max_length'
