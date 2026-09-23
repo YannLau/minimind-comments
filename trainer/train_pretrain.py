@@ -65,13 +65,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     """
     # 用本 epoch 实际训练部分的起点估算剩余时间；last_step 用于处理末尾不足一组的累积梯度。
     start_time = time.time()
-    last_step = start_step
     for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
         # DataLoader 默认在 CPU 产生张量；训练前将输入和监督标签搬到当前进程对应设备。
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
-        last_step = step
-
         # get_lr 使用余弦退火，把当前 epoch/step 展平为全局进度。
         # 这里逐个参数组赋值，是为了兼容优化器未来包含多个 param_group 的情况。
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
@@ -89,7 +86,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         # GradScaler 仅在 FP16 时真正缩放 loss；BF16 或 CPU 下该调用仍保持统一训练流程。
         scaler.scale(loss).backward()
 
-        if step % args.accumulation_steps == 0:
+        if step % args.accumulation_steps == 0 or step == iters:
             # 裁剪前必须先还原被 GradScaler 放大的梯度，否则阈值 grad_clip 没有实际意义。
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -134,15 +131,6 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         # 尽早释放对本批大张量的 Python 引用，便于后续批次复用显存。
         del input_ids, labels, res, loss
-
-    # 若一个 epoch 的微批次数不是 accumulation_steps 的整数倍，循环内不会更新最后一组梯度。
-    # 在这里补做一次更新，避免丢掉尾部样本产生的梯度。其梯度规模会小于完整累积组。
-    if last_step > start_step and last_step % args.accumulation_steps != 0:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ def init_model(args):
         # 字符串 ``None`` 是该命令行参数约定的“不启用”，并非 Python 的 None 对象。
         if args.lora_weight != 'None':
             apply_lora(model)
-            load_lora(model, f'./{args.save_dir}/{args.lora_weight}_{args.hidden_size}.pth')
+            load_lora(model, f'./{args.save_dir}/{args.lora_weight}_{args.hidden_size}{moe_suffix}.pth')
     else:
         # Transformers 格式目录自带 config，因此不再使用上面的结构参数手动构建模型。
         # trust_remote_code=True 允许目录中注册的自定义模型实现被 AutoModel 加载。

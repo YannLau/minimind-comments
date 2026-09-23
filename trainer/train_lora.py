@@ -80,15 +80,13 @@ def train_epoch(epoch, loader, iters, lora_params, start_step=0, wandb=None):
     """
     # 计时从本次实际执行的位置开始；last_step 用来判断循环结束时是否残留未更新梯度。
     start_time = time.time()
-    last_step = start_step
     for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
         # DataLoader 在 CPU 端产生张量，训练前搬到当前进程绑定的 CPU/GPU 设备。
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
-        last_step = step
+        lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
         # 将 epoch 和批次编号展平为全局训练进度，按余弦曲线逐步衰减学习率。
         # 遍历 param_groups 可兼容今后为不同参数设置不同优化器分组的场景。
-        lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
@@ -105,7 +103,7 @@ def train_epoch(epoch, loader, iters, lora_params, start_step=0, wandb=None):
         # GradScaler 仅在 FP16 模式真正缩放损失；BF16/CPU 下仍可共用这一调用方式。
         scaler.scale(loss).backward()
 
-        if step % args.accumulation_steps == 0:
+        if step % args.accumulation_steps == 0 or step == iters:
             # 梯度裁剪前先撤销 FP16 缩放；而且只裁剪真正可训练的 LoRA 参数。
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(lora_params, args.grad_clip)
@@ -146,15 +144,6 @@ def train_epoch(epoch, loader, iters, lora_params, start_step=0, wandb=None):
 
         # 及时释放本批大张量的 Python 引用，便于后续迭代复用显存。
         del input_ids, labels, res, loss
-
-    # 若批次数不是 accumulation_steps 的整数倍，最后一组梯度不会在循环内触发更新。
-    # 此处补做一次更新，避免尾部样本白白参与前向/反向但没有作用到参数上。
-    if last_step > start_step and last_step % args.accumulation_steps != 0:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(lora_params, args.grad_clip)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
 
 if __name__ == "__main__":
     # 只有直接运行本文件时才启动训练；被其他模块导入时只定义 train_epoch。
